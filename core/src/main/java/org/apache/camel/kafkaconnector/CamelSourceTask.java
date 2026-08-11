@@ -65,6 +65,9 @@ public class CamelSourceTask extends SourceTask {
     private static final String LOCAL_URL = "seda:end";
     private static final String DEFAULT_KAMELET_CKC_SOURCE = "kamelet:ckcSource";
 
+    private static final String OFFSET_PARTITION_KEY = "camel.source.offset.property";
+    private static final String OFFSET_VALUE_KEY = "value";
+
     private CamelKafkaConnectMain cms;
     private PollingConsumer consumer;
     private String[] topics;
@@ -81,6 +84,8 @@ public class CamelSourceTask extends SourceTask {
     private SpscArrayQueue<Integer> freeSlots;
     private boolean mapProperties;
     private boolean mapHeaders;
+    private String offsetHeaderName;
+    private String offsetPropertyName;
 
 
     @Override
@@ -93,6 +98,7 @@ public class CamelSourceTask extends SourceTask {
         try {
             LOG.info("Starting CamelSourceTask connector task");
             Map<String, String> actualProps = TaskHelper.combineDefaultAndLoadedProperties(getDefaultConfig(), props);
+            seedConfigFromStoredOffset(actualProps);
             CamelSourceConnectorConfig config = getCamelSourceConnectorConfig(actualProps);
             // the values of these options are masked when the properties of the task are logged
             final Set<String> passwordProperties = TaskHelper.takePasswordPropertyNames(config, actualProps);
@@ -234,8 +240,8 @@ public class CamelSourceTask extends SourceTask {
             LOG.debug("Received Exchange {} with Message {} from Endpoint {}", exchange.getExchangeId(),
                     exchange.getMessage().getMessageId(), exchange.getFromEndpoint());
 
-            Map<String, String> sourcePartition = Collections.singletonMap("endpoint", exchange.getFromEndpoint().toString());
-            Map<String, String> sourceOffset = Collections.singletonMap("position", exchange.getExchangeId());
+            Map<String, String> sourcePartition = getSourcePartition(exchange);
+            Map<String, String> sourceOffset = getSourceOffset(exchange);
 
             final Object messageHeaderKey = camelMessageHeaderKey != null ? exchange.getMessage().getHeader(camelMessageHeaderKey) : null;
             final Object messageBodyValue = toRecordValue(exchange);
@@ -383,6 +389,76 @@ public class CamelSourceTask extends SourceTask {
         } catch (NoTypeConversionAvailableException | TypeConversionException e) {
             throw new ConnectException("Unable to read the stream body of exchange " + exchange.getExchangeId(), e);
         }
+    }
+
+    /**
+     * When {@code camel.source.offset.header} and {@code camel.source.offset.property} are both configured, looks
+     * up the last offset Kafka Connect stored for this task (via {@code context.offsetStorageReader()}) and, if
+     * one exists, overwrites the {@code camel.source.offset.property} entry in {@code actualProps} with it before
+     * the Camel route is built. This lets a consumer resume from where it left off (e.g. a Salesforce Pub/Sub
+     * replayId) instead of always starting from a fixed configured value.
+     */
+    protected void seedConfigFromStoredOffset(Map<String, String> actualProps) {
+        String headerName = actualProps.get(CamelSourceConnectorConfig.CAMEL_SOURCE_OFFSET_HEADER_CONF);
+        String propertyName = actualProps.get(CamelSourceConnectorConfig.CAMEL_SOURCE_OFFSET_PROPERTY_CONF);
+
+        if (headerName == null && propertyName == null) {
+            LOG.debug("{} / {} not set: offset-based resume is disabled, records will use the default endpoint/exchangeId offset.",
+                    CamelSourceConnectorConfig.CAMEL_SOURCE_OFFSET_HEADER_CONF, CamelSourceConnectorConfig.CAMEL_SOURCE_OFFSET_PROPERTY_CONF);
+            return;
+        }
+        if (headerName == null || propertyName == null) {
+            LOG.warn("Only one of {} ({}) and {} ({}) is set: both are required to enable offset-based resume, ignoring.",
+                    CamelSourceConnectorConfig.CAMEL_SOURCE_OFFSET_HEADER_CONF, headerName,
+                    CamelSourceConnectorConfig.CAMEL_SOURCE_OFFSET_PROPERTY_CONF, propertyName);
+            return;
+        }
+
+        offsetHeaderName = headerName;
+        offsetPropertyName = propertyName;
+        LOG.info("Offset-based resume enabled: capturing header {} into config property {} on every poll", offsetHeaderName, offsetPropertyName);
+
+        Map<String, Object> storedOffset = context.offsetStorageReader().offset(Collections.singletonMap(OFFSET_PARTITION_KEY, offsetPropertyName));
+        if (storedOffset == null) {
+            LOG.info("No previously stored offset found for {}, keeping the configured value", offsetPropertyName);
+            return;
+        }
+
+        Object value = storedOffset.get(OFFSET_VALUE_KEY);
+        if (value == null) {
+            return;
+        }
+
+        LOG.info("Resuming from stored offset: setting {} = {}", offsetPropertyName, value);
+        actualProps.put(offsetPropertyName, String.valueOf(value));
+
+        String resumeProperty = actualProps.get(CamelSourceConnectorConfig.CAMEL_SOURCE_OFFSET_RESUME_PROPERTY_CONF);
+        String resumeValue = actualProps.get(CamelSourceConnectorConfig.CAMEL_SOURCE_OFFSET_RESUME_VALUE_CONF);
+        if (resumeProperty != null && resumeValue != null) {
+            LOG.info("Resuming from stored offset: also setting {} = {}", resumeProperty, resumeValue);
+            actualProps.put(resumeProperty, resumeValue);
+        }
+    }
+
+    protected Map<String, String> getSourcePartition(Exchange exchange) {
+        if (offsetPropertyName != null) {
+            return Collections.singletonMap(OFFSET_PARTITION_KEY, offsetPropertyName);
+        }
+        return Collections.singletonMap("endpoint", exchange.getFromEndpoint().toString());
+    }
+
+    protected Map<String, String> getSourceOffset(Exchange exchange) {
+        if (offsetHeaderName != null) {
+            Object value = exchange.getMessage().getHeader(offsetHeaderName);
+            if (value == null) {
+                LOG.warn("Offset-based resume is enabled but header {} was not found on the exchange from {} (available headers: {});"
+                        + " no offset will be recorded for this record.",
+                        offsetHeaderName, exchange.getFromEndpoint(), exchange.getMessage().getHeaders().keySet());
+                return Collections.emptyMap();
+            }
+            return Collections.singletonMap(OFFSET_VALUE_KEY, String.valueOf(value));
+        }
+        return Collections.singletonMap("position", exchange.getExchangeId());
     }
 
     private void setAdditionalHeaders(SourceRecord record, Map<String, Object> map, String prefix) {

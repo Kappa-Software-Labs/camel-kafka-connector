@@ -83,6 +83,26 @@ public class CamelSourceConnectorConfig extends CamelConnectorConfig {
     public static final String CAMEL_SOURCE_KAMELET_CONF = "camel.source.kamelet";
     public static final String CAMEL_SOURCE_KAMELET_DOC = "The kamelet to use as the Camel source endpoint. This is normally set by default for you.";
 
+    public static final String CAMEL_SOURCE_OFFSET_HEADER_DEFAULT = null;
+    public static final String CAMEL_SOURCE_OFFSET_HEADER_CONF = "camel.source.offset.header";
+    public static final String CAMEL_SOURCE_OFFSET_HEADER_DOC = "Name of a Camel exchange header whose value is read from every polled message and persisted as the Kafka Connect source offset."
+          + " Used together with camel.source.offset.property to resume a consumer from where it left off instead of a fixed configured value.";
+
+    public static final String CAMEL_SOURCE_OFFSET_PROPERTY_DEFAULT = null;
+    public static final String CAMEL_SOURCE_OFFSET_PROPERTY_CONF = "camel.source.offset.property";
+    public static final String CAMEL_SOURCE_OFFSET_PROPERTY_DOC = "Name of a connector configuration property (e.g. an endpoint property) to overwrite, before the route starts, with the"
+          + " value of the last offset stored via camel.source.offset.header, if one was previously recorded.";
+
+    public static final String CAMEL_SOURCE_OFFSET_RESUME_PROPERTY_DEFAULT = null;
+    public static final String CAMEL_SOURCE_OFFSET_RESUME_PROPERTY_CONF = "camel.source.offset.resume.property";
+    public static final String CAMEL_SOURCE_OFFSET_RESUME_PROPERTY_DOC = "Name of an additional connector configuration property to overwrite with camel.source.offset.resume.value,"
+          + " but only when a stored offset was actually found and applied via camel.source.offset.property. Lets a companion property"
+          + " (e.g. a replay-mode switch that must flip from its cold-start default to a resume mode) change atomically together with the seeded offset.";
+
+    public static final String CAMEL_SOURCE_OFFSET_RESUME_VALUE_DEFAULT = null;
+    public static final String CAMEL_SOURCE_OFFSET_RESUME_VALUE_CONF = "camel.source.offset.resume.value";
+    public static final String CAMEL_SOURCE_OFFSET_RESUME_VALUE_DOC = "Value to assign to camel.source.offset.resume.property when a stored offset was found and applied.";
+
     private static final ConfigDef CONFIG_DEF = new ConfigDef()
         .define(CAMEL_SOURCE_URL_CONF, Type.STRING, CAMEL_SOURCE_URL_DEFAULT, Importance.HIGH, CAMEL_SOURCE_URL_DOC)
         .define(CAMEL_SOURCE_UNMARSHAL_CONF, Type.STRING, CAMEL_SOURCE_UNMARSHAL_DEFAULT, Importance.HIGH, CAMEL_SOURCE_UNMARSHAL_DOC)
@@ -98,6 +118,10 @@ public class CamelSourceConnectorConfig extends CamelConnectorConfig {
         .define(CAMEL_SOURCE_COMPONENT_CONF, Type.STRING, CAMEL_SOURCE_COMPONENT_DEFAULT, Importance.MEDIUM, CAMEL_SOURCE_COMPONENT_DOC)
         .define(CAMEL_SOURCE_CONTENT_LOG_LEVEL_CONF, Type.STRING, CAMEL_SOURCE_CONTENT_LOG_LEVEL_DEFAULT, Importance.HIGH, CAMEL_SOURCE_CONTENT_LOG_LEVEL_DOC)
         .define(CAMEL_SOURCE_KAMELET_CONF, Type.STRING, CAMEL_SOURCE_KAMELET_DEFAULT, Importance.MEDIUM, CAMEL_SOURCE_KAMELET_DOC)
+        .define(CAMEL_SOURCE_OFFSET_HEADER_CONF, Type.STRING, CAMEL_SOURCE_OFFSET_HEADER_DEFAULT, Importance.LOW, CAMEL_SOURCE_OFFSET_HEADER_DOC)
+        .define(CAMEL_SOURCE_OFFSET_PROPERTY_CONF, Type.STRING, CAMEL_SOURCE_OFFSET_PROPERTY_DEFAULT, Importance.LOW, CAMEL_SOURCE_OFFSET_PROPERTY_DOC)
+        .define(CAMEL_SOURCE_OFFSET_RESUME_PROPERTY_CONF, Type.STRING, CAMEL_SOURCE_OFFSET_RESUME_PROPERTY_DEFAULT, Importance.LOW, CAMEL_SOURCE_OFFSET_RESUME_PROPERTY_DOC)
+        .define(CAMEL_SOURCE_OFFSET_RESUME_VALUE_CONF, Type.STRING, CAMEL_SOURCE_OFFSET_RESUME_VALUE_DEFAULT, Importance.LOW, CAMEL_SOURCE_OFFSET_RESUME_VALUE_DOC)
         .define(CAMEL_CONNECTOR_AGGREGATE_CONF, Type.STRING, CAMEL_CONNECTOR_AGGREGATE_DEFAULT, Importance.MEDIUM, CAMEL_CONNECTOR_AGGREGATE_DOC)
         .define(CAMEL_CONNECTOR_AGGREGATE_SIZE_CONF, Type.INT, CAMEL_CONNECTOR_AGGREGATE_SIZE_DEFAULT, Importance.MEDIUM, CAMEL_CONNECTOR_AGGREGATE_SIZE_DOC)
         .define(CAMEL_CONNECTOR_AGGREGATE_TIMEOUT_CONF, Type.LONG, CAMEL_CONNECTOR_AGGREGATE_TIMEOUT_DEFAULT, Importance.MEDIUM, CAMEL_CONNECTOR_AGGREGATE_TIMEOUT_DOC)
