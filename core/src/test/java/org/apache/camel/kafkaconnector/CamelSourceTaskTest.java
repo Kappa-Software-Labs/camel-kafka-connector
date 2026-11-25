@@ -61,6 +61,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -68,6 +69,30 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 public class CamelSourceTaskTest {
     private static final String DIRECT_URI = "direct:start";
     private static final String TOPIC_NAME = "my-topic";
+
+    @Test
+    public void testSalesforceCheckpointRequiresOneTask() {
+        CamelSourceConnector connector = new CamelSourceConnector();
+        connector.start(Map.of(CamelSourceConnectorConfig.CAMEL_SOURCE_SALESFORCE_PUBSUB_OFFSET_PARTITION_CONF, "sandbox"));
+        assertEquals(1, connector.taskConfigs(1).size());
+        assertThrows(ConnectException.class, () -> connector.taskConfigs(2));
+    }
+
+    @Test
+    public void testSalesforceCheckpointRejectsUnsafeConfigurations() {
+        Map<String, String> props = new HashMap<>();
+        props.put(CamelSourceConnectorConfig.CAMEL_SOURCE_SALESFORCE_PUBSUB_OFFSET_PARTITION_CONF, "sandbox");
+        props.put(CamelSourceConnectorConfig.CAMEL_SOURCE_URL_CONF, "salesforce:pubSubSubscribe:/event/Test__e");
+        props.put(CamelSourceConnectorConfig.TOPIC_CONF, "one,two");
+        assertThrows(ConnectException.class, () -> new CamelSourceTask().start(props));
+
+        props.put(CamelSourceConnectorConfig.TOPIC_CONF, "one");
+        props.put("camel.component.salesforce.consumerWorkerPoolExecutorService", "#pool");
+        assertThrows(ConnectException.class, () -> new CamelSourceTask().start(props));
+
+        props.remove("camel.component.salesforce.consumerWorkerPoolExecutorService");
+        assertThrows(ConnectException.class, () -> new CamelSourceTask().start(props));
+    }
 
     private void sendBatchOfRecords(CamelSourceTask sourceTask, long size) {
         final ProducerTemplate template = sourceTask.getCms().getProducerTemplate();
@@ -91,6 +116,8 @@ public class CamelSourceTaskTest {
 
         assertEquals(size, poll.size());
         assertEquals(TOPIC_NAME, poll.get(0).topic());
+        assertNotNull(poll.get(0).sourcePartition().get("endpoint"));
+        assertNotNull(poll.get(0).sourceOffset().get("position"));
         assertNotNull(poll.get(0).timestamp());
         assertEquals(LoggingLevel.OFF.toString(), sourceTask.getCamelSourceConnectorConfig(props)
             .getString(CamelSourceConnectorConfig.CAMEL_SOURCE_CONTENT_LOG_LEVEL_CONF));

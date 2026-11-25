@@ -25,6 +25,7 @@ import java.util.Map;
 import org.apache.camel.kafkaconnector.utils.TaskHelper;
 import org.apache.kafka.common.config.ConfigDef;
 import org.apache.kafka.connect.connector.Task;
+import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.source.SourceConnector;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -64,6 +65,10 @@ public class CamelSourceConnector extends SourceConnector {
         if (!passwordProperties.isEmpty()) {
             taskProps.put(CamelConnectorConfig.CAMEL_CONNECTOR_PASSWORD_PROPERTIES_CONF, passwordProperties);
         }
+        if (configProps.get(CamelSourceConnectorConfig.CAMEL_SOURCE_SALESFORCE_PUBSUB_OFFSET_PARTITION_CONF) != null && maxTasks != 1) {
+            throw new ConnectException("Salesforce Pub/Sub restart checkpoints require tasks.max=1");
+        }
+        Map<String, String> defaults = getConnectorDefaults();
         final List<Map<String, String>> configs = new ArrayList<>(maxTasks);
         for (int i = 0; i < maxTasks; ++i) {
             configs.add(taskProps);

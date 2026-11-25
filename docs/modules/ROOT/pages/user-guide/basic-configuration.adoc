@@ -45,6 +45,7 @@ For a Source connector the basic options are:
 | camel.source.pollingConsumerBlockTimeout | To use a timeout (in milliseconds) when the producer is blocked if the internal queue is full. If the value is 0 or negative then no timeout is in use. | 0L | MEDIUM
 | camel.source.pollingConsumerBlockWhenFull | Whether to block any producer if the internal queue is full. | true | MEDIUM
 | camel.source.camelMessageHeaderKey | The name of a camel message header containing an unique key that can be used as a Kafka message key. If this is not specified, then the Kafka message will not have a key. | null | MEDIUM
+| camel.source.salesforce.pubsub.offset.partition | Enable Salesforce Pub/Sub restart checkpoints with a stable, non-secret Salesforce org identifier. | null | MEDIUM
 | camel.beans.aggregate | A reference to an aggregate bean, in the form of #class: | null | MEDIUM
 | camel.aggregation.size | The size of the aggregation, to be used in combination with camel.beans.aggregate | 10 | MEDIUM
 | camel.aggregation.timeout | The timeout of the aggregation, to be used in combination with camel.beans.aggregate | 500L | MEDIUM
@@ -98,6 +99,60 @@ A source task receives messages from the Camel route through an internal SEDA qu
 * `camel.source.pollingConsumerBlockTimeout` limits that wait, in milliseconds. When it expires, the message fails instead. `0` or a negative value waits with no limit.
 
 A consumer thread that is waiting on a full queue holds an in-flight exchange. When the task stops, Camel's graceful shutdown waits for it, up to `camel.main.shutdownTimeout` (45 seconds by default), then forces the routes to stop. Kafka Connect only waits `task.shutdown.graceful.timeout.ms` (5 seconds by default) for the task to stop and logs an error when that runs out, so consider setting `camel.main.shutdownTimeout` below it, or a non-zero `camel.source.pollingConsumerBlockTimeout`. A message that was waiting when the task stopped is not delivered to Kafka, like the messages still in the queue; sources that acknowledge only after the record is committed get it again.
+
+== Salesforce Pub/Sub restart checkpoints
+
+The generic source connector can store Salesforce Pub/Sub Replay IDs in Kafka Connect's source offset store.
+Set `camel.source.salesforce.pubsub.offset.partition` to a stable, non-secret identifier for the Salesforce org.
+The offset partition also includes the Salesforce channel; changing the org identifier or channel creates a new checkpoint.
+Use one task, one Salesforce channel and one Kafka output topic, with the default source route and without aggregation or Camel idempotency.
+The Salesforce consumer worker pool and fallback to the latest Replay ID are disabled by this checkpoint mode, and a custom consumer executor is not supported.
+Do not otherwise reorder events before they reach Kafka Connect or remove the `CamelSalesforcePubSubReplayId` header before the source task reads it.
+Kafka Connect saves acknowledged offsets periodically, so restarts can replay records; downstream processing must tolerate duplicates.
+Do not filter events with SMTs or use `errors.tolerance=all` when all events must be delivered.
+
+On the first start there is no checkpoint. Set `replayPreset=EARLIEST` to consume the available retention window, or `LATEST` to start with new events.
+After a checkpoint exists, the connector overrides the URL's replay options with `CUSTOM` and the stored Replay ID.
+When `camel.source.url` is set, endpoint options belong in the URL rather than `camel.source.endpoint.*`.
+Salesforce normally retains platform and CDC events for 72 hours; an expired Replay ID requires an explicit recovery decision.
+The connector checkpoints events, not Salesforce keepalive positions, so a long-idle channel can also leave an old checkpoint.
+
+[WARNING]
+====
+This is restart recovery, not an end-to-end at-least-once guarantee.
+The Camel Salesforce Pub/Sub client manages its own in-memory reconnect position based on received responses, not on Kafka acknowledgements.
+A live reconnect or an upstream processing error may therefore skip events that have not reached Kafka. Upstream Camel changes are required to close this gap.
+====
+
+For example, the following configuration uses a Salesforce platform event and a custom Avro-to-Connect SMT.
+The custom SMT, Confluent Avro converter and their dependencies must be installed in the Kafka Connect worker.
+Configure the worker's `file` config provider and a durable offset store separately.
+Replace the example org identifier, login URL, secret file, Kafka topic and SMT class with your own values.
+
+[source,json]
+----
+{
+  "connector.class": "org.apache.camel.kafkaconnector.CamelSourceConnector",
+  "camel.source.url": "salesforce:pubSubSubscribe:/event/LMMemberInterestUpdated__e?pubSubDeserializeType=AVRO&replayPreset=EARLIEST",
+  "camel.source.salesforce.pubsub.offset.partition": "salesforce-sandbox",
+  "tasks.max": "1",
+  "topics": "salesforce.personal-interests",
+  "camel.component.salesforce.authenticationType": "CLIENT_CREDENTIALS",
+  "camel.component.salesforce.clientId": "${file:/run/mysecrets:SALESFORCE_CLIENT_ID}",
+  "camel.component.salesforce.clientSecret": "${file:/run/mysecrets:SALESFORCE_CLIENT_SECRET}",
+  "camel.component.salesforce.loginUrl": "https://example.my.salesforce.com",
+  "key.converter": "org.apache.kafka.connect.storage.StringConverter",
+  "value.converter": "io.confluent.connect.avro.AvroConverter",
+  "value.converter.schema.registry.url": "http://schema-registry:8081",
+  "transforms": "GenericRecordToStruct,valueToKey,extractKey",
+  "transforms.GenericRecordToStruct.type": "com.example.kafka.connect.transforms.GenericRecordToStruct",
+  "transforms.valueToKey.type": "org.apache.kafka.connect.transforms.ValueToKey",
+  "transforms.valueToKey.fields": "MembershipNumber__c",
+  "transforms.extractKey.type": "org.apache.kafka.connect.transforms.ExtractField$Key",
+  "transforms.extractKey.field": "MembershipNumber__c",
+  "errors.log.enable": "true"
+}
+----
 
 [[BasicConfiguration-MessageLevelHeaders]]
 == Message Level Headers
