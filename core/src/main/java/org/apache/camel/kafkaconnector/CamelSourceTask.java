@@ -33,6 +33,7 @@ import org.apache.camel.StreamCache;
 import org.apache.camel.impl.DefaultCamelContext;
 import org.apache.camel.kafkaconnector.utils.CamelKafkaConnectMain;
 import org.apache.camel.kafkaconnector.utils.SchemaHelper;
+import org.apache.camel.kafkaconnector.utils.SalesforcePubSubOffset;
 import org.apache.camel.kafkaconnector.utils.TaskHelper;
 import org.apache.camel.support.UnitOfWorkHelper;
 import org.apache.kafka.clients.producer.RecordMetadata;
@@ -76,6 +77,7 @@ public class CamelSourceTask extends SourceTask {
     private SpscArrayQueue<Integer> freeSlots;
     private boolean mapProperties;
     private boolean mapHeaders;
+    private SalesforcePubSubOffset salesforceOffset;
 
 
     @Override
@@ -127,6 +129,29 @@ public class CamelSourceTask extends SourceTask {
             final boolean dumpRoutes = config.getBoolean(CamelSourceConnectorConfig.CAMEL_CONNECTOR_DUMP_ROUTES_CONF);
 
             topics = config.getString(CamelSourceConnectorConfig.TOPIC_CONF).split(",");
+            String offsetPartition = config.getString(CamelSourceConnectorConfig.CAMEL_SOURCE_SALESFORCE_PUBSUB_OFFSET_PARTITION_CONF);
+            if (offsetPartition != null) {
+                if (topics.length != 1 || topics[0].trim().isEmpty()) {
+                    throw new ConnectException("Salesforce Pub/Sub restart checkpoints require exactly one Kafka topic");
+                }
+                if (!DEFAULT_KAMELET_CKC_SOURCE.equals(config.getString(CamelSourceConnectorConfig.CAMEL_SOURCE_KAMELET_CONF))
+                        || !DEFAULT_KAMELET_CKC_SOURCE.equals(getSourceKamelet())
+                        || config.getString(CamelSourceConnectorConfig.CAMEL_CONNECTOR_AGGREGATE_CONF) != null
+                        || idempotencyEnabled) {
+                    throw new ConnectException("Salesforce Pub/Sub restart checkpoints require the default source route without aggregation or idempotency");
+                }
+                if (actualProps.keySet().stream()
+                        .anyMatch(key -> "camel.component.salesforce.consumerWorkerPoolExecutorService".equalsIgnoreCase(key))) {
+                    throw new ConnectException("Salesforce Pub/Sub restart checkpoints cannot use a custom consumer executor");
+                }
+                if (context == null || context.offsetStorageReader() == null) {
+                    throw new ConnectException("Salesforce Pub/Sub restart checkpoints require a Kafka Connect offset reader");
+                }
+                salesforceOffset = new SalesforcePubSubOffset(remoteUrl, offsetPartition);
+                remoteUrl = salesforceOffset.resumeUrl(context.offsetStorageReader());
+            } else {
+                salesforceOffset = null;
+            }
 
             long pollingConsumerQueueSize = config.getLong(CamelSourceConnectorConfig.CAMEL_SOURCE_POLLING_CONSUMER_QUEUE_SIZE_CONF);
             long pollingConsumerBlockTimeout = config.getLong(CamelSourceConnectorConfig.CAMEL_SOURCE_POLLING_CONSUMER_BLOCK_TIMEOUT_CONF);
@@ -224,8 +249,10 @@ public class CamelSourceTask extends SourceTask {
             LOG.debug("Received Exchange {} with Message {} from Endpoint {}", exchange.getExchangeId(),
                     exchange.getMessage().getMessageId(), exchange.getFromEndpoint());
 
-            Map<String, String> sourcePartition = Collections.singletonMap("endpoint", exchange.getFromEndpoint().toString());
-            Map<String, String> sourceOffset = Collections.singletonMap("position", exchange.getExchangeId());
+            Map<String, String> sourcePartition = salesforceOffset != null ? salesforceOffset.partition()
+                    : Collections.singletonMap("endpoint", exchange.getFromEndpoint().toString());
+            Map<String, String> sourceOffset = salesforceOffset != null ? salesforceOffset.offset(exchange)
+                    : Collections.singletonMap("position", exchange.getExchangeId());
 
             final Object messageHeaderKey = camelMessageHeaderKey != null ? exchange.getMessage().getHeader(camelMessageHeaderKey) : null;
             Object messageBodyValue = exchange.getMessage().getBody();
