@@ -127,32 +127,6 @@ A live reconnect or an upstream processing error may therefore skip events that 
 For example, the following configuration uses a Salesforce platform event and a custom Avro-to-Connect SMT.
 The custom SMT, Confluent Avro converter and their dependencies must be installed in the Kafka Connect worker.
 Configure the worker's `file` config provider and a durable offset store separately.
-Replace the example org identifier, login URL, secret file, Kafka topic and SMT class with your own values.
-
-[source,json]
-----
-{
-  "connector.class": "org.apache.camel.kafkaconnector.CamelSourceConnector",
-  "camel.source.url": "salesforce:pubSubSubscribe:/event/LMMemberInterestUpdated__e?pubSubDeserializeType=AVRO&replayPreset=EARLIEST",
-  "camel.source.salesforce.pubsub.offset.partition": "salesforce-sandbox",
-  "tasks.max": "1",
-  "topics": "salesforce.personal-interests",
-  "camel.component.salesforce.authenticationType": "CLIENT_CREDENTIALS",
-  "camel.component.salesforce.clientId": "${file:/run/mysecrets:SALESFORCE_CLIENT_ID}",
-  "camel.component.salesforce.clientSecret": "${file:/run/mysecrets:SALESFORCE_CLIENT_SECRET}",
-  "camel.component.salesforce.loginUrl": "https://example.my.salesforce.com",
-  "key.converter": "org.apache.kafka.connect.storage.StringConverter",
-  "value.converter": "io.confluent.connect.avro.AvroConverter",
-  "value.converter.schema.registry.url": "http://schema-registry:8081",
-  "transforms": "GenericRecordToStruct,valueToKey,extractKey",
-  "transforms.GenericRecordToStruct.type": "com.example.kafka.connect.transforms.GenericRecordToStruct",
-  "transforms.valueToKey.type": "org.apache.kafka.connect.transforms.ValueToKey",
-  "transforms.valueToKey.fields": "MembershipNumber__c",
-  "transforms.extractKey.type": "org.apache.kafka.connect.transforms.ExtractField$Key",
-  "transforms.extractKey.field": "MembershipNumber__c",
-  "errors.log.enable": "true"
-}
-----
 
 [[BasicConfiguration-MessageLevelHeaders]]
 == Message Level Headers
