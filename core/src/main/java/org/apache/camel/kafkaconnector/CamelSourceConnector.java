@@ -68,7 +68,6 @@ public class CamelSourceConnector extends SourceConnector {
         if (configProps.get(CamelSourceConnectorConfig.CAMEL_SOURCE_SALESFORCE_PUBSUB_OFFSET_PARTITION_CONF) != null && maxTasks != 1) {
             throw new ConnectException("Salesforce Pub/Sub restart checkpoints require tasks.max=1");
         }
-        Map<String, String> defaults = getConnectorDefaults();
         final List<Map<String, String>> configs = new ArrayList<>(maxTasks);
         for (int i = 0; i < maxTasks; ++i) {
             configs.add(taskProps);
